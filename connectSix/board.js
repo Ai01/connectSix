@@ -2,21 +2,35 @@ import React, { Component } from 'react';
 import {
    View,
    Text,
+   Button,
    TouchableOpacity,
    StyleSheet 
 } from 'react-native';
 import Svg, { Line, Circle } from 'react-native-svg';
+import { getBoardState, spellToPosition } from './util';
+import ai from './ai';
 
 class Board extends Component {
 
   constructor(props){
     super(props);
+    // boardState代表棋盘中的棋子表示,0表示没有棋子，1表示为黑棋,2表示为白棋
     this.state = {
       width: 300,
       height: 300,
-      size: 15,
+      size: 18,
       margin: 20,
-      chessPieces:[]
+      // 棋盘状态，用来传给后端  
+      boardState: getBoardState(),
+      // 棋子,显示在前端界面
+      chessPieces: [],
+      // 落子颜色
+      operator:'black',
+      // 落子次数
+      counts: {
+        black: 0,
+        white: 0
+      }
     }
   }
 
@@ -32,6 +46,7 @@ class Board extends Component {
     const _cellSize= _width/_size;
     const rowLines = [];
     const columnLines = [];
+    // 画棋盘
     for(let i=0;rowLines.length<_size+1;i++){
       rowLines.push(
         <Line 
@@ -52,29 +67,97 @@ class Board extends Component {
           key={`${i}-column`} />
       );
     }
+    // 画棋子
     const _chessPieces = this.state.chessPieces.map((item,index)=>{
       return (
         <Circle cx={item.cx} cy={item.cy} r="7" fill={item.color} key={`chessPiece-${index}`} />
       );
     });
+    // console.log('boardState',this.state.boardState);
     return rowLines.concat(columnLines).concat(_chessPieces);
   }
 
   renderChessPiece = (x,y,color) => {
     const _cellSize = this.state.width/this.state.size;
     const _margin = this.state.margin;
-    const _cx = Math.round(Math.round(x-_margin)/_cellSize)*_cellSize + _margin;
-    const _cy = Math.round(Math.round(y-_margin)/_cellSize)*_cellSize+ _margin;
-    const _chessPiece = {
-      cx: _cx,
-      cy: _cy,
+    // 改变boardState
+    const _boardState = this.state.boardState;
+    const _cxForBoardState = Math.round(Math.round(x-_margin)/_cellSize);
+    const _cyForBoardState = Math.round(Math.round(y-_margin)/_cellSize);
+    if(color==="black"){
+      _boardState[_cxForBoardState][_cyForBoardState] = 1; 
+    }else if(color==="white"){
+      _boardState[_cxForBoardState][_cyForBoardState] = 2; 
+    }else{
+      console.error('棋子颜色设置错误');
+    }
+    // 画棋子
+    const _chessPieces = this.state.chessPieces;
+    const _cxForSvg = Math.round(Math.round(x-_margin)/_cellSize)*_cellSize + _margin;
+    const _cyForSvg = Math.round(Math.round(y-_margin)/_cellSize)*_cellSize + _margin;
+    const _chessPieceItem = {
+      cx:  _cxForSvg,
+      cy: _cyForSvg,
       color,
-    };
-    const _oldCheddPieces = this.state.chessPieces.concat(_chessPiece);
+    }
+    _chessPieces.push(_chessPieceItem);
+    // 改变下一次落子，颜色。
+    let _operator = this.state.operator;
+    const _counts = this.state.counts;
+    if(color === 'black'){
+      _counts['black'] = _counts['black'] + 1;
+      if(_counts['black']===1 && _counts['white']===0){
+        _operator = 'white';
+      }else if(_counts['black']-_counts['white'] < 1 && _counts['white']!=0){
+        _operator = 'black';
+      }else{
+        _operator = 'white';
+      }
+    }else if(color==='white'){
+      _counts['white'] = _counts['white'] + 1;
+      if(_counts['white']-_counts['black'] < 1){
+        _operator = 'white';
+      }else {
+        _operator = 'black';
+      }
+    }else {
+      console.error('棋子颜色设置错误');
+    }
     this.setState({
-      chessPieces: _oldCheddPieces, 
+      boardState: _boardState, 
+      chessPieces: _chessPieces,
+      counts: _counts,
+      operator: _operator
     })
   }
+
+  // 判断是否可以执行ai计算
+  isAi = () => {
+    const _counts = this.state.counts;
+    const _dif = Math.abs(_counts['black']-_counts['white']);
+    if(_counts['black']===0 || _counts['white']===0){ return false;}
+    if(_dif === 0){ return true;}
+    return false;
+  }
+
+  // ai返回结果绘制
+  aiRender = () =>{
+    const _cellSize = this.state.width/this.state.size;
+    const _margin = this.state.margin;
+    const _color = this.state.operator;
+    ai(this.state.boardState).then((text)=>{
+      if(text.split(' ')[0] != 'move'){
+        alert('后端返回错误:',text);
+        return;
+      }
+      spellToPosition(text.split(' ')[1]).map((item)=>{
+        const _cx = item.cx * _cellSize + _margin;
+        const _cy = item.cy * _cellSize + _margin;
+        this.renderChessPiece(_cx,_cy,_color);
+     });
+    });
+  }
+  
 
   render(){
     return (
@@ -83,7 +166,8 @@ class Board extends Component {
             const _nativeEvent = evt.nativeEvent;
             const _cx = _nativeEvent.locationX;
             const _cy = _nativeEvent.locationY;
-            this.renderChessPiece(_cx,_cy,'black');
+            const _color = this.state.operator;
+            this.renderChessPiece(_cx,_cy,_color);
           }} 
           style={Styles.boardContainer} 
         >
@@ -91,6 +175,11 @@ class Board extends Component {
             { this.renderBoard() }
           </Svg>
         </TouchableOpacity>
+        <Button title="AI" 
+          onPress={()=>{
+            this.aiRender();
+          }} 
+          color='black' disabled={this.isAi()} />
       </View>
     );
   }
